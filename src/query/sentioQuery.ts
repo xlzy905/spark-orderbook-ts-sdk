@@ -441,36 +441,27 @@ export class SentioQuery extends Fetch {
     const sqlQuery: sqlQueryParams = {
       sqlQuery: {
         sql: `
-        WITH RankedData AS (
-              SELECT 
-                  user, 
-                  SUM(pnlComp1) AS total_pnlComp1, 
-                  SUM(quoteAmount) AS total_quoteAmount,
-                  ROW_NUMBER() OVER (ORDER BY SUM(pnlComp1) DESC) AS position
-              FROM Balance
-              GROUP BY user
-              HAVING SUM(pnlComp1) != 0
+          WITH RankedData AS (
+            SELECT 
+                user, 
+                SUM(pnlComp1) AS total_pnlComp1, 
+                SUM(quoteAmount) AS total_quoteAmount
+            FROM Balance
+            GROUP BY user
+            HAVING SUM(pnlComp1) != 0
           ),
           UserVolumes AS (
-              SELECT
-                  user,
-                  SUM(volume) AS total_volume
-              FROM (
-                  SELECT
-                      t.buyer AS user,
-                      t.volume
-                  FROM TradeEvent t
-                  WHERE t.timestamp >= ${startTime} AND t.timestamp <= ${endTime}
-                  UNION ALL
-                  SELECT
-                      t.seller AS user,
-                      t.volume
-                  FROM TradeEvent t
-                  WHERE t.timestamp >= ${startTime} AND t.timestamp <= ${endTime}
-              ) AS combined
-              GROUP BY user
+              SELECT 
+                  b.user,
+                  COALESCE(SUM(te.volume), 0) AS total_volume
+              FROM (SELECT DISTINCT user FROM Balance) b
+              LEFT JOIN TradeEvent te
+                  ON te.timestamp BETWEEN ${startTime} AND ${endTime}
+                  AND (te.seller = b.user OR te.buyer = b.user)
+              GROUP BY b.user
           )
-          SELECT rd.*, uv.total_volume
+          SELECT rd.*, uv.total_volume,
+                ROW_NUMBER() OVER (ORDER BY rd.total_pnlComp1 ${side}) AS position
           FROM RankedData rd
           LEFT JOIN UserVolumes uv ON rd.user = uv.user
           WHERE rd.user ILIKE '%' || '${search}' || '%'
